@@ -1,50 +1,99 @@
-# 🛡️ Vietinbank eFast Application Analysis & Bypass Tweak (iOS/Jailbreak)
+# 🏦 iOS Runtime Cryptography Tracing – Security Research Case Study
 
-This repository contains the analysis methodology and custom tweaks developed to overcome the sophisticated anti-debugging, anti-hooking, and SSL Pinning mechanisms implemented in the Vietinbank eFast mobile banking application on iOS.
+> 🔬 **Security Research & Authorized Testing Only**  
+> This repository documents a **real-world mobile security research case study** conducted on the iOS application of **one of the four largest commercial banks in Vietnam**.
 
-The primary goal of this project was to successfully capture and log the application's clean JSON payloads (both requests and responses) before they are encrypted and after they are decrypted at the application layer.
+---
 
-## 🚀 The Challenge
+## 🧭 Research Context
 
-The Vietinbank eFast application employs multiple layers of protection that necessitate an advanced reverse engineering approach:
+This project originates from a security assessment of a **tier-1 Vietnamese banking mobile application**, used by millions of customers nationwide.
 
-1.  **Anti-Debugging/Anti-Hooking:** The application actively detects and terminates when standard dynamic analysis tools (like Frida or debuggers) are attached or when injection frameworks (like Cydia Substrate) are used.
-2.  **SSL Pinning (Network Layer):** Traditional network interception using proxies (e.g., Burp Suite, Mitmproxy) is prevented due to strict certificate validation checks.
-3.  **Application-Level Encryption (Data Layer):** Even after bypassing SSL Pinning, the payload data exchanged over the network remains encrypted using a proprietary or custom cryptographic scheme, preventing direct viewing of transactions.
+### 🔐 Android vs iOS Security Posture
 
-## 💡 Methodology & Technical Steps
+| Platform | Observations |
+|--------|--------------|
+| 🤖 **Android** | Heavily protected. Multiple layers of anti-tampering, anti-hooking, and runtime integrity checks. All dynamic instrumentation attempts were blocked during research. |
+| 🍎 **iOS** | Despite strong surface-level protections (TLS pinning, jailbreak detection, hook detection), the application exposes **multiple architectural weaknesses at runtime**. |
 
-The analysis was executed in a three-phase escalation:
+👉 **Key insight**:  
+> The iOS version relies on **client-side cryptographic operations** that can be observed **before encryption** and **after decryption**, even when network traffic itself remains fully encrypted.
 
-### Phase 1: Bypassing Anti-Hooking & Function Tracing
+---
 
-* **Technique:** Custom Dylib Injection (or Tweak) for **Runtime Objective-C Analysis**.
-* **Purpose:** To programmatically iterate through all loaded classes and methods (using tools like `tweak_function_trace.m`) to identify classes responsible for security and network handling.
-* **Result:** Identification of the critical class, `SecurityPackage`.
+## 🎯 Research Objective
 
-### Phase 2: Kernel-Level SSL Pinning Bypass
+The goal of this research is **not** to bypass protections for exploitation, but to:
 
-* **Technique:** The standard SSL Pinning bypass was insufficient. A modified **SSL Kill Switch** was built and deployed to run at a low-level (kernel/system components) to unconditionally disable certificate validation.
-* **Result:** Successful man-in-the-middle (MITM) interception of the encrypted traffic.
+- 📖 Study **real-world banking app security design**
+- 🧠 Understand **runtime cryptography workflows**
+- 🔍 Identify **systemic weaknesses in iOS app architecture**
+- 🛡️ Provide insights for **defensive improvement**
 
-### Phase 3: Hooking Application-Layer Cryptography
+---
 
-* **Technique:** A final, targeted tweak (`teak_get_enc_dec.m`) was developed to hook the discovered methods in the `SecurityPackage` class.
-* **Goal:** To extract the Objective-C object containing the data *just before* it is passed to the encryption function, and *just after* it is returned from the decryption function.
-* **Result:** Successful logging of clean, human-readable JSON payloads.
+## 🧠 Core Research Findings (High Level)
 
-## 📈 Analysis Flow Diagram
+### ⚠️ 1. Client-Side Encryption Visibility
+Sensitive request payloads are constructed and encrypted **inside Objective-C runtime methods**, making them observable **before cryptographic transformation**.
 
-The diagram below illustrates the successful data interception flow using the custom tweaks:
+### ⚠️ 2. Post-Decryption Response Exposure
+Decrypted server responses are returned as structured objects **inside the app process**, enabling inspection **after decryption but before UI rendering**.
 
-```mermaid
-graph TD
-    A[Vietinbank eFast App] -->|1. Clean JSON Payload| B(SecurityPackage Class);
-    B -->|2. Hooked: GET_ENC_STRING_NEW:| C{Tweak: teak_get_enc_dec.m};
-    C -->|3. LOG: Clean JSON (Pre-Enc)| D[System Log / oslog];
-    B -->|4. Encrypt Data| E[Encrypted Payload];
-    E -->|5. TLS Layer (Bypassed Pinning)| F[Network Proxy (Burp/Mitm)];
-    F -->|6. Encrypted Response| G[App Receive];
-    G -->|7. Hooked: GET_DEC_STRING_NEW:| H{Tweak: teak_get_enc_dec.m};
-    H -->|8. LOG: Clean JSON (Post-Dec)| D;
-    H -->|9. Decrypted Payload| A;
+### ⚠️ 3. Over-Reliance on Hook Detection
+The app attempts to block:
+- Frida attachment
+- Substrate-based hooks
+- Dynamic instrumentation
+
+However, **method-level runtime tracing remains possible** via carefully designed tweaks.
+
+### ⚠️ 4. Asymmetric Security Maturity
+Android security implementation is significantly more mature and hardened compared to iOS, indicating:
+- Platform inconsistency
+- Security design drift between teams
+
+---
+
+## 🛠️ Research Methodology
+
+### 🧪 Phase 1 – Runtime Visibility
+A Theos-based jailbreak tweak is used to:
+- Hook selected Objective-C methods
+- Log parameters and return values
+- Avoid modifying control flow
+
+### 🕵️ Phase 2 – Objective-C Hunter
+A dynamic enumeration module:
+- Scans loaded classes at runtime
+- Filters by banking / crypto / security keywords
+- Dumps method lists for manual analysis
+
+### 🔎 Phase 3 – Cryptographic Flow Mapping
+By correlating:
+- Runtime logs
+- Method names
+- Input/output structures
+
+The **full client-side crypto lifecycle** can be reconstructed **without decrypting network traffic**.
+
+---
+
+## 🧬 Example Runtime Observation (Sanitized)
+
+```json
+ENCRYPT INPUT:
+{
+  "username": "...",
+  "password": "...",
+  "deviceOS": "iOS",
+  "requestId": "..."
+}
+
+DECRYPT OUTPUT:
+{
+  "status": {
+    "code": "0",
+    "message": "User does not exist"
+  }
+}
