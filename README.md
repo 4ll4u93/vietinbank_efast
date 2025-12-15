@@ -80,6 +80,7 @@ It logs:
 - Return values (after decryption)
 
 ---
+<img width="1605" height="881" alt="1" src="https://github.com/user-attachments/assets/3274cb34-34cb-4d60-b114-4a794a73877b" />
 
 ### 🧠 Core Hook Implementation
 
@@ -278,3 +279,4 @@ This is a **systemic architectural concern** for high-risk mobile applications s
 ## 📬 Responsible Disclosure
 
 If you are part of the affected organization, please follow your internal responsible disclosure process.
+
