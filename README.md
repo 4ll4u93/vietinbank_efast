@@ -182,3 +182,129 @@ License & Disclaimer
 
 This repository is provided for authorized security research and education. Use at your own risk. No warranty is provided. The authors are not responsible for misuse.
 
+Step-by-step build & integration guide (Vietnamese)
+-------------------------------------------------
+
+Below is a practical write-up describing how to build the Theos tweak that embeds `/enc` and `/dec` endpoints and how to use it with a proxy for request/response translation. The instructions assume a typical Theos workflow.
+
+Prerequisites
+- macOS (recommended) with Xcode command-line tools (or a cross-build environment that supports Theos).
+- Theos installed and configured. If you prefer rootless packaging on-device, set `THEOS=/var/theos` on device or your cross-build environment.
+- A jailbroken iPhone for testing (or a device + rootless Theos tooling). Device must be reachable on the local network from your analyst machine.
+- `dpkg` / `scp` / `ssh` access to the device for installing packages.
+- `ldid` or codesigning tools if building for a device requiring signing.
+
+Files to check in the repo
+- `my_tweak/tweak_full.m` — contains the hooks, webserver startup (`startWebServer()`), and handlers for `/enc` and `/dec`.
+- `Makefile` inside `my_tweak` (Theos Makefile) used to build the tweak.
+- `mitm_proxy_doan.py` (or `mitmproxy1.py`) — example proxy addon to integrate with the tweak.
+
+Step-by-step build and install
+1) Prepare the tweak source
+   - Confirm `my_tweak/tweak_full.m` implements:
+     - Hook for `GET_ENC_STRING_NEW:` that captures `sharedSecurityInstance` and returns the original encryption result.
+     - Hook for `GET_DEC_STRING_NEW:` that calls original decrypt and logs/returns the result.
+     - `startWebServer()` which registers `/enc` and `/dec` using `GCDWebServer` and starts it on port `1997`.
+
+2) Ensure dependencies are available
+   - Add `GCDWebServer` source or import into the `my_tweak` vendor folder. The Theos target must be able to link or compile the GCDWebServer sources.
+   - In your `Makefile`, ensure required frameworks are declared (example):
+
+```
+TWEAK_NAME = eFastTrace
+eFastTrace_FILES = tweak_full.m
+eFastTrace_FRAMEWORKS = Foundation Security
+eFastTrace_PRIVATE_FRAMEWORKS = GCDWebServer
+```
+
+Note: The exact Makefile syntax depends on your Theos / Logos setup — add `GCDWebServer` sources under `vendor` and include them in the build if not available as a framework.
+
+3) Set THEOS and build
+
+```bash
+export THEOS=/path/to/theos   # or /var/mobile/theos for on-device build
+cd my_tweak
+make clean
+make package ROOTLESS=1      # use ROOTLESS=1 if building rootless package
+```
+
+4) Install on-device
+
+```bash
+scp packages/*.deb root@<device-ip>:/tmp/
+ssh root@<device-ip> "dpkg -i /tmp/*.deb"
+# Restart the target app or respring if needed
+```
+
+5) Verify webserver and hooks
+- On the device, check logs for the webserver start message: `oslog | grep DOANNGUYEN` or `oslog | grep eFastTrace`.
+- If `sharedSecurityInstance` is not captured, open the app and perform the action that instantiates `SecurityPackage` so hooks attach.
+
+6) Configure your proxy machine
+- Ensure your analyst machine (running mitmproxy/Burp) and the device are on the same network.
+- Update `mitm_proxy_doan.py` or the example mitmproxy addon with the device IP (e.g., `IPHONE_URL = "http://192.168.5.193:1997"`).
+
+7) Run mitmproxy and proxy the app traffic
+- Start `mitmproxy` or `mitmdump` with your addon loaded. Example:
+
+```bash
+# run mitmproxy with your addon
+mitmdump -s mitm_proxy_doan.py
+```
+
+- Confirm that outgoing requests for configured host (e.g., `efastmb.vietinbank.vn`) are forwarded to `/enc` and replaced with the encrypted bytes returned by the tweak.
+
+Troubleshooting
+- Webserver fails to bind: ensure `GCDWebServerOption_BindToLocalhost: @NO` is used intentionally; firewall or sandbox restrictions can block binding to non-localhost addresses.
+- `sharedSecurityInstance` null: interact with the app UI until the class that implements `GET_ENC_STRING_NEW:` is loaded; then retry the HTTP call to `/enc`.
+- `original_impl` or `original_dec_impl` null: verify the hook registration succeeded for `SecurityPackage` in logs at startup.
+- Use `oslog` or device `syslog` to view messages: `oslog | grep DOANNGUYEN`.
+
+Data flow model (diagram)
+-------------------------
+
+High-level sequence (proxy-assisted mode):
+
+Analyst machine (Burp / mitmproxy)
+     |
+   send plaintext JSON
+     |
+   -> mitmproxy addon POST /enc -> `http://<iphone-ip>:1997/enc`
+     |
+   iPhone GCDWebServer `/enc` calls `original_impl(sharedSecurityInstance, sel, json)`
+     |
+   App's `GET_ENC_STRING_NEW:` returns encrypted string
+     |
+   iPhone returns encrypted string to mitmproxy
+     |
+   mitmproxy gzips (if required) and forwards to bank server
+
+Bank Server
+   |
+   Encrypted response
+   |
+   -> mitmproxy receives encrypted bytes -> mitmproxy POST /dec -> `http://<iphone-ip>:1997/dec`
+   |
+   iPhone `/dec` handler calls `original_dec_impl(sharedSecurityInstance, sel, encrypted_string)`
+   |
+   Decrypted object returned to mitmproxy
+   |
+   mitmproxy replaces proxied response body with plaintext JSON for analyst view
+
+ASCII flow diagram (simplified):
+
+[Burp/mitmproxy] --(plaintext JSON)--> [mitmproxy addon] --(POST /enc)--> [iPhone GCDWebServer /enc]
+    --(call original_impl)--> [App: GET_ENC_STRING_NEW] --(encrypted string)--> [iPhone] --(response)--> [mitmproxy]
+    --(forward to bank)--> [Bank]
+
+[Bank] --(encrypted response)--> [mitmproxy] --(POST /dec)--> [iPhone GCDWebServer /dec]
+    --(call original_dec_impl)--> [App: GET_DEC_STRING_NEW] --(plaintext)--> [iPhone] --(response)--> [mitmproxy]
+    --(replace response)--> [Burp/analyst view]
+
+Security & ethics reminder
+- Only run these steps in authorized testing environments.
+
+Notes & next steps
+- I can (optionally) add a sample `Makefile` snippet tailored to your `my_tweak` layout, or update `mitm_proxy_doan.py` to match the exact `/enc` and `/dec` request/response shapes used by your tweak.
+
+
